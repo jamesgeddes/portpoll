@@ -1,22 +1,20 @@
-# Must be run via mesos slave VM/deployed to mesos. quick and dirty is better!
-#
-# Get IP addresses for MongoDB instances
-# Get ports to ping
-# Ping every second
-# Output datetime,port_list,response
 import datetime
 
 
 def is_open(ip, port):
     import socket
-    print("Scanning " + ip + ":" + str(port) + " ")
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    try:
-        s.connect((ip, int(port)))
-        s.shutdown(1)
-        return True
-    except:
-        return False
+    out = [datetime_now_iso(), ip, port]
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.settimeout(1)
+    result = sock.connect_ex((ip, int(port)))
+    if result == 0:
+        out.append(True)
+        sock.close()
+        return out
+    else:
+        out.append(False)
+        sock.close()
+        return out
 
 
 def get_file(file_name: str):
@@ -33,16 +31,18 @@ def file_exists(file_name: str):
     return True
 
 
-def append_csv(file_name: str, row_content: list):
+def write_csv(file_name: str, row_content: list):
     import csv
     file_name = file_name + ".csv"
     file_exists(file_name)
     with open(file_name, "a") as f:
         writer = csv.writer(f)
         writer.writerow(row_content)
+        f.flush()
+    return 0
 
 
-def iso_datetime_now():
+def datetime_now_iso():
     from datetime import datetime
     return datetime.strftime(datetime.now(), "%Y-%m-%dT%H:%M:%S.%f")
 
@@ -63,19 +63,18 @@ def scan_list(ip_list, port_list):
 
 def main(ip_list, port_list, duration_minutes: int):
     import concurrent.futures
-    print("Scan started")
     start_time = datetime.datetime.now()
+    write_csv("scan-" + str(start_time), ["DateTime", "IP", "Port", "Alive"])
+    print("Scan started at " + str(start_time))
     nodes = scan_list(ip_list, port_list)
     while not done_yet(start_time, duration_minutes):
         with concurrent.futures.ThreadPoolExecutor() as executor:
-            for node in nodes:
-                print(node)
-                results = [(executor.submit(is_open, ip=node[0], port=node[1]))]
-                # results = [iso_datetime_now(), node[0], node[1], (executor.submit(is_open, ip=node[0], port=node[1]))]
+            results = [executor.submit(is_open, ip=node[0], port=node[1]) for node in nodes]
 
-            for f in concurrent.futures.as_completed(results):
-                append_csv("out", [f.result()])
-    print("Done")
+        for f in concurrent.futures.as_completed(results):
+            write_csv("scan-" + str(start_time), f.result())
+    end_time = datetime.datetime.now()
+    print("Scan completed at " + str(end_time))
 
 
-main(get_file("ip_list"), get_file("port_list"), 5)
+main(get_file("ip_list"), get_file("port_list"), 2)
